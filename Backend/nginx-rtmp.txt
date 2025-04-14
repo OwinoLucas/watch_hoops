@@ -1,0 +1,31 @@
+# /etc/nginx/nginx.conf
+
+rtmp {
+    server {
+        listen 1935;
+        chunk_size 4096;
+        
+        application live {
+            live on;
+            record off;
+            
+            # Secure streaming with key
+            on_publish http://localhost:8000/api/streaming/auth;
+            
+            # HLS
+            hls on;
+            hls_path /tmp/hls;
+            hls_fragment 3;
+            hls_playlist_length 60;
+            
+            # Enable HLS encryption
+            hls_keys on;
+            hls_key_path /tmp/keys;
+            hls_key_url https://yourserver.com/keys/;
+            
+            # DASH
+            dash on;
+            dash_path /tmp/dash;
+        }
+    }
+}
