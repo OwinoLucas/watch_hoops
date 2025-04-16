@@ -61,8 +61,15 @@ class Game(models.Model):
         help_text="Current status of the game"
     )
     home_score = models.IntegerField(
-        null=True, 
-        blank=True    class Meta:
+        null=True,
+        blank=True
+    )
+    away_score = models.IntegerField(
+        null=True,
+        blank=True
+    )
+
+    class Meta:
         ordering = ['-date_time']
         indexes = [
             models.Index(fields=['status', 'date_time']),

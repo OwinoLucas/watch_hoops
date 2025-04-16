@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import viewsets, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Player, PlayerStats
+from .models import Player,PlayerTeamHistory
 from .serializers import PlayerSerializer, PlayerStatsSerializer
 from permissions import IsAdminOrReadOnly
 
@@ -31,17 +31,17 @@ class PlayerViewSet(viewsets.ModelViewSet):
         serializer = PlayerStatsSerializer(stats, many=True)
         return Response(serializer.data)
 
-class PlayerStatsViewSet(viewsets.ModelViewSet):
-    """
-    Handles CRUD operations for Player Statistics
-    GET /api/players/stats/ - List all player statistics
-    GET /api/players/stats/{id}/ - Get specific player statistics
-    POST /api/players/stats/ - Create new player statistics
-    PUT /api/players/stats/{id}/ - Update player statistics
-    DELETE /api/players/stats/{id}/ - Delete player statistics
-    """
-    queryset = PlayerStats.objects.all()
-    serializer_class = PlayerStatsSerializer
-    filter_backends = [filters.OrderingFilter]
-    ordering_fields = ['season_year', 'points_per_game', 'assists_per_game', 'rebounds_per_game']
-# Create your views here.
+# class PlayerStatsViewSet(viewsets.ModelViewSet):
+#     """
+#     Handles CRUD operations for Player Statistics
+#     GET /api/players/stats/ - List all player statistics
+#     GET /api/players/stats/{id}/ - Get specific player statistics
+#     POST /api/players/stats/ - Create new player statistics
+#     PUT /api/players/stats/{id}/ - Update player statistics
+#     DELETE /api/players/stats/{id}/ - Delete player statistics
+#     """
+#     queryset = PlayerStats.objects.all()
+#     serializer_class = PlayerStatsSerializer
+#     filter_backends = [filters.OrderingFilter]
+#     ordering_fields = ['season_year', 'points_per_game', 'assists_per_game', 'rebounds_per_game']
+# # Create your views here.

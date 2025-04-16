@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from .models import StreamKey, StreamAccess
+from .models import  StreamAccess
 from games.models import Game
 from django.utils import timezone
 from datetime import timedelta, datetime
@@ -15,15 +15,15 @@ seven_days_ago = datetime.now() - timedelta(days=7)
 print(seven_days_ago)
 
 
-@api_view(['POST'])
-def stream_auth(request):
-    """Authenticate RTMP stream publishing"""
-    stream_key = request.POST.get('name')
-    try:
-        stream = StreamKey.objects.get(key=stream_key, is_active=True)
-        return Response(status=status.HTTP_200_OK)
-    except StreamKey.DoesNotExist:
-        return Response(status=status.HTTP_403_FORBIDDEN)
+# @api_view(['POST'])
+# def stream_auth(request):
+#     """Authenticate RTMP stream publishing"""
+#     stream_key = request.POST.get('name')
+#     try:
+#         stream = StreamKey.objects.get(key=stream_key, is_active=True)
+#         return Response(status=status.HTTP_200_OK)
+#     except StreamKey.DoesNotExist:
+#         return Response(status=status.HTTP_403_FORBIDDEN)
 
 class StreamAccessViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]

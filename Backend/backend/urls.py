@@ -27,4 +27,9 @@ urlpatterns = [
     path('api/news/', include('news.urls')),
     path('api/auth/', include('accounts.urls')),
     path('api/streaming/', include('streaming.urls')),
+    path('api/analytics/', include('analytics.urls')),
+    path('api/notifications/', include('notifications.urls')),
+    path('api/tickets/', include('tickets.urls')),
+    path('api/reports/', include('reports.urls')),
+    path('api/search/', include('search.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

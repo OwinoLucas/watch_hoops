@@ -34,8 +34,7 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = []
 
 
-# Application definition
-
+# Application settings
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -43,8 +42,13 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-     # Third party apps
     'rest_framework',
+    'django_filters',
+    'analytics',
+    'reports',
+    'search',
+    'monitoring',
+    'django_elasticsearch_dsl',
     'rest_framework_simplejwt',
     'corsheaders',
     
@@ -56,7 +60,6 @@ INSTALLED_APPS = [
     'accounts',
     'streaming',
 ]
-
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -65,6 +68,10 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Custom monitoring middleware
+    'monitoring.middleware.RequestLoggingMiddleware',
+    'monitoring.middleware.ErrorLoggingMiddleware',
+    'monitoring.middleware.PerformanceMonitoringMiddleware',
 ]
 
 CORS_ALLOWED_ORIGINS = [
@@ -185,11 +192,63 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Media files configuration
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
+# https://docs.djangoproject.com/en/3.2/howto/static-files/
+
 STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Redis Cache Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'IGNORE_EXCEPTIONS': True,  # Redis is not critical to app function
+            'SOCKET_CONNECT_TIMEOUT': 5,  # 5 seconds timeout for connect
+            'SOCKET_TIMEOUT': 5,  # 5 seconds timeout for read/write operations
+        },
+        'KEY_PREFIX': 'watchhoops',  # Prefix for cache keys
+        'TIMEOUT': 60 * 60 * 24,  # 24 hours default timeout
+    },
+    'session': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/2',  # Use a different DB
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+        'KEY_PREFIX': 'watchhoops_session',
+    },
+    'analytics': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/3',  # Use a different DB
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+        'KEY_PREFIX': 'watchhoops_analytics',
+        'TIMEOUT': 60 * 60 * 2,  # 2 hours for analytics data
+    }
+}
+
+# Elasticsearch Configuration
+ELASTICSEARCH_DSL = {
+    'default': {
+        'hosts': 'localhost:9200'
+    },
+}
+
+# Monitoring Configuration
+MONITORING_IGNORED_PATHS = [
+    '/admin/', 
+    '/static/', 
+    '/media/',
+    '/api/monitoring/health/basic',
+]
+MONITORING_SLOW_REQUEST_THRESHOLD_MS = 500  # Threshold for logging slow requests
+MONITORING_METRIC_SAMPLE_INTERVAL = 300  # Sample system metrics every 5 minutes
+
+# API Version
+API_VERSION = '1.0.0'
 
 
 # M-Pesa settings
@@ -210,3 +269,22 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'your-email@gmail.com'
 EMAIL_HOST_PASSWORD = 'your-app-specific-password'
+# Add new apps to INSTALLED_APPS
+INSTALLED_APPS += [
+    'channels',
+    'tickets.apps.TicketsConfig',
+    'notifications.apps.NotificationsConfig',
+]
+
+# Channels configuration
+ASGI_APPLICATION = 'backend.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(os.environ.get('REDIS_HOST', '127.0.0.1'), 
+                      int(os.environ.get('REDIS_PORT', 6379)))],
+        },
+    },
+}

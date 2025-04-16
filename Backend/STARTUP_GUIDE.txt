@@ -1,0 +1,131 @@
+Watch Hoops Backend - Startup Guide
+
+1. First-Time Setup:
+
+   a. Redis Installation (if not already installed):
+      ```bash
+      sudo apt-get install redis redis-tools
+      ```
+
+   b. Python Dependencies:
+      ```bash
+      pip install channels channels-redis qrcode pillow
+      ```
+
+2. Required Services:
+
+   a. MySQL Database:
+      - Start: sudo service mysql start
+      - Verify: sudo service mysql status
+      - Required for: All data storage (games, tickets, users, etc.)
+
+   b. Redis Server:
+      - Start: sudo service redis start
+      - Verify: redis-cli ping (should return "PONG")
+      - Required for: WebSocket/real-time features
+      - Status check: sudo service redis status
+
+3. Environment Variables (.env):
+   ```
+   # Database Settings
+   DB_ENGINE=django.db.backends.mysql
+   DB_NAME=hoops
+   DB_USER=your_user
+   DB_PASSWORD=your_password
+   DB_HOST=localhost
+   DB_PORT=3306
+
+   # Redis Settings
+   REDIS_HOST=localhost
+   REDIS_PORT=6379
+
+   # Django Settings
+   SECRET_KEY=your_secret_key
+   DEBUG=True
+   ALLOWED_HOSTS=localhost,127.0.0.1
+
+   # Site Settings
+   SITE_URL=http://localhost:8000
+   ```
+
+4. WebSocket Endpoints:
+   - Game Statistics: ws://localhost:8000/ws/games/live/{game_id}/
+   - Notifications: ws://localhost:8000/ws/notifications/
+
+5. Starting the Development Server:
+
+   a. Start all required services:
+      ```bash
+      # Start MySQL (if not already running)
+      sudo service mysql start
+
+      # Start Redis (if not already running)
+      sudo service redis start
+      ```
+
+   b. Activate virtual environment:
+      ```bash
+      source ../venv/bin/activate
+      ```
+
+   c. Start Django development server:
+      ```bash
+      python manage.py runserver
+      ```
+
+6. Verifying Everything is Working:
+
+   a. Check MySQL connection:
+      ```bash
+      python manage.py dbshell
+      ```
+
+   b. Check Redis connection:
+      ```bash
+      redis-cli ping  # Should return "PONG"
+      ```
+
+   c. Test WebSocket connections:
+      - Open Django admin interface
+      - Create a test game
+      - Connect to WebSocket endpoint
+      - Verify real-time updates
+
+7. Troubleshooting:
+
+   a. WebSocket Issues:
+      - Check Redis status: sudo service redis status
+      - Verify ASGI configuration in settings.py
+      - Check browser console for connection errors
+      - Ensure channels and channels-redis are installed
+
+   b. Database Issues:
+      - Verify MySQL is running: sudo service mysql status
+      - Check database credentials in .env
+      - Ensure database exists: mysql -u root -p
+
+   c. Permission Issues:
+      - Check media directory permissions for ticket QR codes
+      - Verify Redis socket permissions
+      - Check MySQL user permissions
+
+8. API Features Dependencies:
+
+   a. Ticket System:
+      - MySQL: Store ticket data
+      - Redis: Real-time validation
+      - Media storage: QR code images
+
+   b. Real-time Game Statistics:
+      - MySQL: Store game data
+      - Redis: WebSocket communication
+      - Channels: Handle WebSocket connections
+
+   c. Notification System:
+      - MySQL: Store notifications
+      - Redis: Real-time delivery
+      - Channels: WebSocket communication
+
+Remember: All services (MySQL, Redis) must be running before starting the Django development server for full functionality.
+
+For production deployment, additional configuration will be needed for proper security and performance optimization.

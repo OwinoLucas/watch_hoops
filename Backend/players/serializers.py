@@ -1,9 +1,9 @@
 from rest_framework import serializers
-from .models import Player, PlayerStats
+from .models import Player, PlayerTeamHistory
 
 class PlayerStatsSerializer(serializers.ModelSerializer):
     class Meta:
-        model = PlayerStats
+        model = PlayerTeamHistory
         fields = '__all__'
 
 class PlayerSerializer(serializers.ModelSerializer):
