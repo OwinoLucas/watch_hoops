@@ -10,6 +10,7 @@ from .models import SalesReport, AttendanceReport, RevenueReport
 from .serializers import SalesReportSerializer, AttendanceReportSerializer, RevenueReportSerializer
 from tickets.models import Ticket, TicketPurchase
 from games.models import Game
+from datetime import timezone, timedelta
 # from games.serializers import GameSerializer
 
 class ReportsViewSet(viewsets.ViewSet):

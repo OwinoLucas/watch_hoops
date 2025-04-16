@@ -9,6 +9,8 @@ from .serializers import UserSerializer, RegisterSerializer, ChangePasswordSeria
 
 User = get_user_model()
 
+# Create your views here.
+
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (AllowAny,)
@@ -50,4 +52,4 @@ class LogoutView(generics.GenericAPIView):
         except Exception:
             return Response({"message": "Invalid token."}, 
                           status=status.HTTP_400_BAD_REQUEST)
-# Create your views here.
+

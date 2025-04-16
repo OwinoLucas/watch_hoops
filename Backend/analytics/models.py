@@ -1,12 +1,14 @@
 from django.db import models
 from django.utils import timezone
 from django.db.models import Avg, Count, Sum, F, Q
+from django.core.cache import cache
 from games.models import Game, MatchStats
 from players.models import Player
 from teams.models import Team
 import json
 import math
-
+from functools import lru_cache
+from datetime import timedelta
 class PlayerAnalytics(models.Model):
     player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='analytics')
     date = models.DateField(default=timezone.now)
@@ -42,54 +44,83 @@ class PlayerAnalytics(models.Model):
     def calculate_true_shooting(self):
         """Calculate true shooting percentage"""
         # TS% = Points / (2 * (FGA + (0.44 * FTA)))
-        stats = PlayerGameStats.objects.filter(player=self.player).order_by('-game__date_time')[:10]
+        cache_key = f"player_true_shooting_{self.player.id}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+            
+        # Get match stats from the games model
+        stats = MatchStats.objects.filter(player=self.player).order_by('-match__date_time')[:10]
         if not stats:
             return 0.0
             
+        # Need to handle the fact that MatchStats doesn't have field_goals_attempted and free_throws_attempted directly
+        # We can estimate these based on field goal percentage and free throw percentage if available
+        # For now, using a simplification:
         total_points = sum(s.points for s in stats)
-        total_fga = sum(s.field_goals_attempted for s in stats)
-        total_fta = sum(s.free_throws_attempted for s in stats)
         
-        if total_fga == 0 and total_fta == 0:
+        # Estimate FGA based on points (assuming average of 1.5 points per FGA)
+        estimated_fga = total_points / 1.5
+        
+        # Estimate FTA based on typical ratio to FGA (around 0.3)
+        estimated_fta = estimated_fga * 0.3
+        
+        if estimated_fga == 0 and estimated_fta == 0:
+            cache.set(cache_key, 0.0, timeout=3600)  # Cache for 1 hour
             return 0.0
             
-        denominator = 2 * (total_fga + (0.44 * total_fta))
+        denominator = 2 * (estimated_fga + (0.44 * estimated_fta))
         if denominator == 0:
+            cache.set(cache_key, 0.0, timeout=3600)
             return 0.0
             
-        return round((total_points / denominator) * 100, 2)
+        result = round((total_points / denominator) * 100, 2)
+        cache.set(cache_key, result, timeout=3600)  # Cache for 1 hour
+        return result
         
     def calculate_trend(self, days=30):
         """Calculate performance trend over specified days"""
+        # Cache the result for performance
+        cache_key = f"player_trend_{self.player.id}_{days}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+            
         # Compare recent games to the period before them
         now = timezone.now().date()
-        mid_point = now - timezone.timedelta(days=days//2)
-        start_date = now - timezone.timedelta(days=days)
+        mid_point = now - timedelta(days=days//2)
+        start_date = now - timedelta(days=days)
         
-        recent_stats = PlayerGameStats.objects.filter(
+        recent_stats = MatchStats.objects.filter(
             player=self.player, 
-            game__date_time__date__gte=mid_point,
-            game__date_time__date__lte=now
+            match__date_time__date__gte=mid_point,
+            match__date_time__date__lte=now
         )
         
-        older_stats = PlayerGameStats.objects.filter(
+        older_stats = MatchStats.objects.filter(
             player=self.player,
-            game__date_time__date__gte=start_date,
-            game__date_time__date__lt=mid_point
+            match__date_time__date__gte=start_date,
+            match__date_time__date__lt=mid_point
         )
         
         if not recent_stats or not older_stats:
+            cache.set(cache_key, ('STABLE', 0.0), timeout=86400)  # Cache for 1 day
             return 'STABLE', 0.0
-            
+        
+        # Use the efficiency property from MatchStats
         recent_efficiency = sum(s.efficiency for s in recent_stats) / recent_stats.count() if recent_stats.count() > 0 else 0
         older_efficiency = sum(s.efficiency for s in older_stats) / older_stats.count() if older_stats.count() > 0 else 0
         
+        result = None
         if recent_efficiency > older_efficiency * 1.1:
-            return 'IMPROVING', recent_efficiency
+            result = ('IMPROVING', recent_efficiency)
         elif recent_efficiency < older_efficiency * 0.9:
-            return 'DECLINING', recent_efficiency
+            result = ('DECLINING', recent_efficiency)
         else:
-            return 'STABLE', recent_efficiency
+            result = ('STABLE', recent_efficiency)
+            
+        cache.set(cache_key, result, timeout=86400)  # Cache for 1 day
+        return result
 
 class PlayerPerformancePrediction(models.Model):
     player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='performance_predictions')
@@ -118,15 +149,15 @@ class PlayerPerformancePrediction(models.Model):
         opponent = self.game.home_team if self.game.away_team == self.player.team else self.game.away_team
         
         # Get player stats from last 5 games against this opponent
-        vs_opponent_stats = PlayerGameStats.objects.filter(
+        vs_opponent_stats = MatchStats.objects.filter(
             player=self.player,
-            game__home_team=opponent
-        ).order_by('-game__date_time')[:5]
+            match__home_team=opponent
+        ).order_by('-match__date_time')[:5]
         
         # Get player stats from last 10 games overall
-        recent_stats = PlayerGameStats.objects.filter(
+        recent_stats = MatchStats.objects.filter(
             player=self.player
-        ).order_by('-game__date_time')[:10]
+        ).order_by('-match__date_time')[:10]
         
         # Calculate predictions based on weighted average
         if not recent_stats:
@@ -219,21 +250,344 @@ class PlayerPerformancePrediction(models.Model):
         self.save()
 
 class TeamAnalytics(models.Model):
+    """
+    Represents basketball team analytics metrics.
+    
+    This model stores comprehensive analytics for teams, including:
+    - Win/loss records
+    - Scoring averages
+    - Advanced metrics like offensive/defensive ratings
+    - Team efficiency indicators
+    
+    Analytics are calculated for specific dates, allowing for trend analysis over time.
+    """
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='analytics')
     date = models.DateField(default=timezone.now)
+    
+    # Basic statistics
     wins = models.IntegerField(default=0)
     losses = models.IntegerField(default=0)
     points_scored_avg = models.DecimalField(max_digits=5, decimal_places=2)
     points_allowed_avg = models.DecimalField(max_digits=5, decimal_places=2)
     win_percentage = models.DecimalField(max_digits=5, decimal_places=2)
     
+    # Advanced analytics fields
+    offensive_rating = models.DecimalField(max_digits=5, decimal_places=2, default=0.0, 
+                                           help_text="Points scored per 100 possessions")
+    defensive_rating = models.DecimalField(max_digits=5, decimal_places=2, default=0.0, 
+                                          help_text="Points allowed per 100 possessions")
+    net_rating = models.DecimalField(max_digits=5, decimal_places=2, default=0.0,
+                                    help_text="Offensive rating minus defensive rating")
+    pace = models.DecimalField(max_digits=5, decimal_places=2, default=0.0,
+                              help_text="Possessions per 48 minutes")
+    
+    # Quarter-by-quarter performance
+    q1_points_scored_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    q2_points_scored_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    q3_points_scored_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    q4_points_scored_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    q1_points_allowed_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    q2_points_allowed_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    q3_points_allowed_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    q4_points_allowed_avg = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    
+    # Home/away splits
+    home_win_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    away_win_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    
+    # Performance trends
+    trend_direction = models.CharField(max_length=10, choices=[
+        ('IMPROVING', 'Improving'),
+        ('DECLINING', 'Declining'),
+        ('STABLE', 'Stable'),
+    ], default='STABLE')
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
     class Meta:
         unique_together = ['team', 'date']
         ordering = ['-date']
+        verbose_name = "Team Analytics"
+        verbose_name_plural = "Team Analytics"
 
     def __str__(self):
         return f"{self.team.name} Analytics - {self.date}"
+        
+    def calculate_metrics(self):
+        """Calculate all team metrics based on game data"""
+        # Using a cached approach for expensive calculations
+        cache_key = f"team_metrics_{self.team.id}_{self.date}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+            
+        # Get team stats using the team model's methods
+        team_stats = self.team.get_team_statistics()
+        
+        # Basic stats
+        self.wins = team_stats.get('wins', 0)
+        self.losses = team_stats.get('losses', 0)
+        self.points_scored_avg = team_stats.get('avg_points_scored', 0)
+        self.points_allowed_avg = team_stats.get('avg_points_conceded', 0)
+        self.win_percentage = team_stats.get('win_percentage', 0)
+        
+        # Calculate advanced metrics
+        self.calculate_advanced_metrics()
+        
+        # Calculate quarter-by-quarter averages
+        self.calculate_quarter_stats()
+        
+        # Calculate home/away splits
+        self.calculate_home_away_splits()
+        
+        # Calculate trend direction
+        self.calculate_trend()
+        
+        # Save and cache the results
+        self.save()
+        cache.set(cache_key, True, timeout=3600)  # Cache for 1 hour
+        return True
+        
+    def calculate_advanced_metrics(self):
+        """Calculate advanced team metrics: offensive rating, defensive rating, pace"""
+        # Using caching for performance
+        cache_key = f"team_advanced_metrics_{self.team.id}_{self.date}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            self.offensive_rating = cached_result["offensive_rating"]
+            self.defensive_rating = cached_result["defensive_rating"]
+            self.net_rating = cached_result["net_rating"]
+            self.pace = cached_result["pace"]
+            return
 
+        # Get recent games for the team
+        recent_games = Game.objects.filter(
+            Q(home_team=self.team) | Q(away_team=self.team),
+            status='FINISHED'
+        ).order_by('-date_time')[:20]
+        
+        if not recent_games:
+            return
+            
+        # Calculate total team possessions and opponent possessions
+        total_team_possessions = 0
+        total_opponent_possessions = 0
+        total_team_points = 0
+        total_opponent_points = 0
+        total_games = len(recent_games)
+        
+        for game in recent_games:
+            is_home = game.home_team == self.team
+            
+            if is_home:
+                team_score = game.home_score
+                opponent_score = game.away_score
+            else:
+                team_score = game.away_score
+                opponent_score = game.home_score
+                
+            # Estimate possessions using the NBA formula: 
+            # Poss = FGA + 0.4*FTA - 1.07*(ORB/(ORB+DRB))*(FGA-FGM) + TOV
+            # Since we don't have all these stats, using simplified estimation:
+            # Roughly 1 possession per point + adjustments for pace
+            estimated_team_possessions = team_score * 1.1
+            estimated_opponent_possessions = opponent_score * 1.1
+            
+            total_team_possessions += estimated_team_possessions
+            total_opponent_possessions += estimated_opponent_possessions
+            total_team_points += team_score
+            total_opponent_points += opponent_score
+        
+        # Calculate ratings per 100 possessions
+        if total_team_possessions > 0:
+            self.offensive_rating = round((total_team_points / total_team_possessions) * 100, 2)
+        else:
+            self.offensive_rating = 0
+            
+        if total_opponent_possessions > 0:
+            self.defensive_rating = round((total_opponent_points / total_opponent_possessions) * 100, 2)
+        else:
+            self.defensive_rating = 0
+            
+        self.net_rating = self.offensive_rating - self.defensive_rating
+        
+        # Calculate pace (average possessions per 48 minutes)
+        avg_possessions = (total_team_possessions + total_opponent_possessions) / (2 * total_games)
+        self.pace = round(avg_possessions, 2)
+        
+        # Cache the results
+        cache.set(cache_key, {
+            "offensive_rating": self.offensive_rating,
+            "defensive_rating": self.defensive_rating,
+            "net_rating": self.net_rating,
+            "pace": self.pace
+        }, timeout=3600)  # Cache for 1 hour
+        
+    def calculate_quarter_stats(self):
+        """Calculate quarter-by-quarter performance averages"""
+        # Using caching for performance
+        cache_key = f"team_quarter_stats_{self.team.id}_{self.date}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            for key, value in cached_result.items():
+                setattr(self, key, value)
+            return
+            
+        # For now, we need to estimate since quarter data isn't available directly
+        # In a real system, you would have quarter-by-quarter scoring
+        
+        # Get the team's recent games
+        recent_games = Game.objects.filter(
+            Q(home_team=self.team) | Q(away_team=self.team),
+            status='FINISHED'
+        ).order_by('-date_time')[:20]
+        
+        if not recent_games:
+            return
+            
+        # Estimate quarter scores based on typical NBA scoring distributions
+        # These percentages reflect a common pattern where teams score slightly 
+        # more in the 2nd and 4th quarters
+        q1_score_pct = 0.23  # 23% of total scoring
+        q2_score_pct = 0.26  # 26% of total scoring
+        q3_score_pct = 0.24  # 24% of total scoring
+        q4_score_pct = 0.27  # 27% of total scoring
+        
+        avg_points_scored = float(self.points_scored_avg)
+        avg_points_allowed = float(self.points_allowed_avg)
+        
+        # Calculate quarter averages
+        self.q1_points_scored_avg = round(avg_points_scored * q1_score_pct, 2)
+        self.q2_points_scored_avg = round(avg_points_scored * q2_score_pct, 2)
+        self.q3_points_scored_avg = round(avg_points_scored * q3_score_pct, 2)
+        self.q4_points_scored_avg = round(avg_points_scored * q4_score_pct, 2)
+        
+        self.q1_points_allowed_avg = round(avg_points_allowed * q1_score_pct, 2)
+        self.q2_points_allowed_avg = round(avg_points_allowed * q2_score_pct, 2)
+        self.q3_points_allowed_avg = round(avg_points_allowed * q3_score_pct, 2)
+        self.q4_points_allowed_avg = round(avg_points_allowed * q4_score_pct, 2)
+        
+        # Cache the results
+        cache.set(cache_key, {
+            "q1_points_scored_avg": self.q1_points_scored_avg,
+            "q2_points_scored_avg": self.q2_points_scored_avg,
+            "q3_points_scored_avg": self.q3_points_scored_avg,
+            "q4_points_scored_avg": self.q4_points_scored_avg,
+            "q1_points_allowed_avg": self.q1_points_allowed_avg,
+            "q2_points_allowed_avg": self.q2_points_allowed_avg,
+            "q3_points_allowed_avg": self.q3_points_allowed_avg,
+            "q4_points_allowed_avg": self.q4_points_allowed_avg
+        }, timeout=3600)  # Cache for 1 hour
+        
+    def calculate_home_away_splits(self):
+        """Calculate home vs away performance splits"""
+        # Using caching for performance
+        cache_key = f"team_home_away_splits_{self.team.id}_{self.date}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            self.home_win_percentage = cached_result["home_win_percentage"]
+            self.away_win_percentage = cached_result["away_win_percentage"]
+            return
+            
+        # Get recent home games
+        home_games = Game.objects.filter(
+            home_team=self.team,
+            status='FINISHED'
+        ).order_by('-date_time')[:20]
+        
+        # Get recent away games
+        away_games = Game.objects.filter(
+            away_team=self.team,
+            status='FINISHED'
+        ).order_by('-date_time')[:20]
+        
+        # Calculate home win percentage
+        home_wins = sum(1 for game in home_games if game.home_score > game.away_score)
+        home_games_count = len(home_games)
+        
+        if home_games_count > 0:
+            self.home_win_percentage = round((home_wins / home_games_count) * 100, 2)
+        else:
+            self.home_win_percentage = 0
+            
+        # Calculate away win percentage
+        away_wins = sum(1 for game in away_games if game.away_score > game.home_score)
+        away_games_count = len(away_games)
+        
+        if away_games_count > 0:
+            self.away_win_percentage = round((away_wins / away_games_count) * 100, 2)
+        else:
+            self.away_win_percentage = 0
+            
+        # Cache the results
+        cache.set(cache_key, {
+            "home_win_percentage": self.home_win_percentage,
+            "away_win_percentage": self.away_win_percentage
+        }, timeout=3600)  # Cache for 1 hour
+        
+    def calculate_trend(self):
+        """Calculate trend direction (improving, declining, stable)"""
+        # Using caching for performance
+        cache_key = f"team_trend_{self.team.id}_{self.date}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            self.trend_direction = cached_result
+            return
+            
+        # Compare recent games to earlier games
+        now = timezone.now().date()
+        mid_point = now - timedelta(days=15)
+        start_date = now - timedelta(days=30)
+        
+        # Get recent games (last 15 days)
+        recent_games = Game.objects.filter(
+            Q(home_team=self.team) | Q(away_team=self.team),
+            status='FINISHED',
+            date_time__date__gte=mid_point,
+            date_time__date__lte=now
+        )
+        
+        # Get earlier games (15-30 days ago)
+        earlier_games = Game.objects.filter(
+            Q(home_team=self.team) | Q(away_team=self.team),
+            status='FINISHED',
+            date_time__date__gte=start_date,
+            date_time__date__lt=mid_point
+        )
+        
+        if not recent_games or not earlier_games:
+            self.trend_direction = 'STABLE'
+            cache.set(cache_key, self.trend_direction, timeout=86400)  # Cache for 1 day
+            return
+            
+        # Calculate win percentages for both periods
+        recent_wins = 0
+        for game in recent_games:
+            is_home = game.home_team == self.team
+            if (is_home and game.home_score > game.away_score) or (not is_home and game.away_score > game.home_score):
+                recent_wins += 1
+                
+        earlier_wins = 0
+        for game in earlier_games:
+            is_home = game.home_team == self.team
+            if (is_home and game.home_score > game.away_score) or (not is_home and game.away_score > game.home_score):
+                earlier_wins += 1
+                
+        recent_win_pct = recent_wins / len(recent_games) if recent_games else 0
+        earlier_win_pct = earlier_wins / len(earlier_games) if earlier_games else 0
+        
+        # Determine trend direction
+        if recent_win_pct > earlier_win_pct * 1.1:
+            self.trend_direction = 'IMPROVING'
+        elif recent_win_pct < earlier_win_pct * 0.9:
+            self.trend_direction = 'DECLINING'
+        else:
+            self.trend_direction = 'STABLE'
+            
+        # Cache the result
+        cache.set(cache_key, self.trend_direction, timeout=86400)  # Cache for 1 day
 class GamePrediction(models.Model):
     game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name='predictions')
     home_team_win_probability = models.DecimalField(max_digits=5, decimal_places=2)
@@ -623,4 +977,106 @@ class TeamPerformanceTrend(models.Model):
             if is_home:
                 team_score = game.home_score
                 opponent_score = game.away_score
-                home_points_scored += team
+                home_points_scored += team_score
+                home_points_allowed += opponent_score
+                
+                # Track home wins/losses
+                if team_score > opponent_score:
+                    self.home_wins += 1
+                    self.wins += 1
+                else:
+                    self.home_losses += 1
+                    self.losses += 1
+            else:
+                team_score = game.away_score
+                opponent_score = game.home_score
+                away_points_scored += team_score
+                away_points_allowed += opponent_score
+                
+                # Track away wins/losses
+                if team_score > opponent_score:
+                    self.away_wins += 1
+                    self.wins += 1
+                else:
+                    self.away_losses += 1
+                    self.losses += 1
+                    
+            # Update streak information
+            game_result = 'WIN' if team_score > opponent_score else 'LOSS'
+            
+            if current_streak_type is None:
+                # First game in sequence
+                current_streak_type = game_result
+                current_streak_count = 1
+            elif current_streak_type == game_result:
+                # Continuation of streak
+                current_streak_count += 1
+            else:
+                # Streak broken
+                current_streak_type = game_result
+                current_streak_count = 1
+                
+            total_points_scored += team_score
+            total_points_allowed += opponent_score
+        
+        # Calculate averages
+        if self.games_played > 0:
+            self.points_scored_avg = round(total_points_scored / self.games_played, 2)
+            self.points_allowed_avg = round(total_points_allowed / self.games_played, 2)
+            
+            home_games = self.home_wins + self.home_losses
+            if home_games > 0:
+                self.home_points_scored_avg = round(home_points_scored / home_games, 2)
+                self.home_points_allowed_avg = round(home_points_allowed / home_games, 2)
+                
+            away_games = self.away_wins + self.away_losses
+            if away_games > 0:
+                self.away_points_scored_avg = round(away_points_scored / away_games, 2)
+                self.away_points_allowed_avg = round(away_points_allowed / away_games, 2)
+        
+        # Set current streak
+        if current_streak_count > 0:
+            self.streak_type = current_streak_type
+            self.streak_count = current_streak_count
+            
+        # Calculate trend direction by comparing recent to previous performance
+        if len(games) >= 4:
+            mid_point_idx = len(games) // 2
+            recent_games = games[mid_point_idx:]
+            earlier_games = games[:mid_point_idx]
+            
+            recent_wins = sum(1 for g in recent_games if 
+                             (g.home_team == self.team and g.home_score > g.away_score) or 
+                             (g.away_team == self.team and g.away_score > g.home_score))
+            
+            earlier_wins = sum(1 for g in earlier_games if 
+                              (g.home_team == self.team and g.home_score > g.away_score) or 
+                              (g.away_team == self.team and g.away_score > g.home_score))
+            
+            # Calculate win percentages for both periods
+            recent_win_pct = recent_wins / len(recent_games) if recent_games else 0
+            earlier_win_pct = earlier_wins / len(earlier_games) if earlier_games else 0
+            
+            # Determine trend direction
+            if recent_win_pct > earlier_win_pct * 1.1:
+                self.trend_direction = 'IMPROVING'
+            elif recent_win_pct < earlier_win_pct * 0.9:
+                self.trend_direction = 'DECLINING'
+            else:
+                self.trend_direction = 'STABLE'
+        
+        # Calculate advanced metrics
+        # Use simplified formulas for demonstration purposes
+        if self.games_played > 0:
+            # Offensive efficiency (points per 100 possessions)
+            # A typical NBA game has around 100 possessions
+            self.offensive_efficiency = round(self.points_scored_avg * 100 / 100, 2)
+            
+            # Defensive efficiency (points allowed per 100 possessions)
+            self.defensive_efficiency = round(self.points_allowed_avg * 100 / 100, 2)
+            
+            # Pace (estimated possessions per game)
+            # A simple estimate based on total points
+            self.pace = round((self.points_scored_avg + self.points_allowed_avg) / 2, 2)
+        
+        self.save()

@@ -571,37 +571,87 @@ class TeamPerformanceTrendViewSet(AnalyticsViewSet):
         
         return min(net_ratings, key=lambda x: x[1])[0]
     
-    # @action(detail=True, methods=['get'])
-    # def home_away_splits(self, request, pk=None):
-    #     """
-    #     Get home/away performance splits
-    #     """
-    #     trend = self.get_object()
+    @action(detail=True, methods=['get'])
+    def home_away_splits(self, request, pk=None):
+        """
+        Get home/away performance splits for a team within a specific time period.
         
-    #     home_win_pct = (trend.home_wins / (trend.home_wins + trend.home_losses)) * 100 if (trend.home_wins + trend.home_losses) > 0 else 0
-    #     away_win_pct = (trend.away_wins / (trend.away_wins + trend.away_losses)) * 100 if (trend.away_wins + trend.away_losses) > 0 else 0
+        This endpoint provides detailed comparison of a team's performance at home versus away games,
+        including:
+        - Win-loss records in each context
+        - Scoring averages
+        - Point differentials
+        - Overall home vs away advantages/disadvantages
         
-    #     splits_data = {
-    #         'team_id': trend.team.id,
-    #         'team_name': trend.team.name,
-    #         'period': f"{trend.period_start} to {trend.period_end}",
-    #         'home': {
-    #             'games': trend.home_wins + trend.home_losses,
-    #             'wins': trend.home_wins,
-    #             'losses': trend.home_losses,
-    #             'win_percentage': round(home_win_pct, 2),
-    #             'points_scored_avg': float(trend.home_points_scored_avg),
-    #             'points_allowed_avg': float(trend.home_points_allowed_avg),
-    #             'point_differential': float(trend.home_points_scored_avg) - float(trend.home_points_allowed_avg),
-    #         },
-    #         'away': {
-    #             'games': trend.away_wins + trend.away_losses,
-    #             'wins': trend.away_wins,
-    #             'losses': trend.away_losses,
-    #             'win_percentage': round(away_win_pct, 2),
-    #             'points_scored_avg': float(trend.away_points_scored_avg),
-    #             'points_allowed_avg': float(trend.away_points_allowed_avg),
-    #             'point_differential': float(trend.away_points_scored_avg) - float(trend.away_points_allowed_avg),
-    #         },
-    #         'home_vs_away_differential': {
-    #             'win_percentage': round(home_win_pct - away_win_p
+        Returns a comprehensive analysis object that can be used to determine if a team
+        performs significantly better at home or on the road.
+        """
+        try:
+            trend = self.get_object()
+            
+            # Calculate win percentages with error handling
+            home_games_played = trend.home_wins + trend.home_losses
+            away_games_played = trend.away_wins + trend.away_losses
+            
+            # Check if there are enough games for meaningful analysis
+            if home_games_played < 2 or away_games_played < 2:
+                return Response(
+                    {"error": "Insufficient games for meaningful home/away analysis",
+                     "home_games": home_games_played,
+                     "away_games": away_games_played},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            home_win_pct = (trend.home_wins / home_games_played) * 100 if home_games_played > 0 else 0
+            away_win_pct = (trend.away_wins / away_games_played) * 100 if away_games_played > 0 else 0
+            
+            # Calculate point differentials
+            home_point_differential = float(trend.home_points_scored_avg) - float(trend.home_points_allowed_avg)
+            away_point_differential = float(trend.away_points_scored_avg) - float(trend.away_points_allowed_avg)
+            
+            # Format the response with all calculations properly rounded
+            splits_data = {
+                'team_id': trend.team.id,
+                'team_name': trend.team.name,
+                'period': f"{trend.period_start} to {trend.period_end}",
+                'home': {
+                    'games': home_games_played,
+                    'wins': trend.home_wins,
+                    'losses': trend.home_losses,
+                    'win_percentage': round(home_win_pct, 2),
+                    'points_scored_avg': round(float(trend.home_points_scored_avg), 2),
+                    'points_allowed_avg': round(float(trend.home_points_allowed_avg), 2),
+                    'point_differential': round(home_point_differential, 2),
+                },
+                'away': {
+                    'games': away_games_played,
+                    'wins': trend.away_wins,
+                    'losses': trend.away_losses,
+                    'win_percentage': round(away_win_pct, 2),
+                    'points_scored_avg': round(float(trend.away_points_scored_avg), 2),
+                    'points_allowed_avg': round(float(trend.away_points_allowed_avg), 2),
+                    'point_differential': round(away_point_differential, 2),
+                },
+                'home_vs_away_differential': {
+                    'win_percentage': round(home_win_pct - away_win_pct, 2),
+                    'points_scored': round(float(trend.home_points_scored_avg) - float(trend.away_points_scored_avg), 2),
+                    'points_allowed': round(float(trend.home_points_allowed_avg) - float(trend.away_points_allowed_avg), 2),
+                    'point_differential': round(home_point_differential - away_point_differential, 2),
+                    'advantage': 'home' if home_point_differential > away_point_differential else 'away',
+                    'advantage_strength': 'strong' if abs(home_point_differential - away_point_differential) > 10 else 
+                                         'moderate' if abs(home_point_differential - away_point_differential) > 5 else 'slight'
+                }
+            }
+            
+            return Response(splits_data)
+            
+        except TeamPerformanceTrend.DoesNotExist:
+            return Response(
+                {"error": "Team performance trend not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Error calculating home/away splits: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

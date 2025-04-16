@@ -2,6 +2,15 @@
 
 Watch Hoops is a basketball streaming platform that allows users to watch live games, follow their favorite teams and players, and stay updated with the latest basketball news.
 
+Watch Hoops is a comprehensive basketball platform that provides:
+- Live game streaming with real-time player statistics
+- Complete league and tournament management
+- Real-time player statistics tracking during games
+- League schedule management and game fixtures
+- News and announcements system for leagues and teams
+- Integrated ticket purchasing system for live games
+- Team and player profile management
+- Historical statistics and analytics
 ## Project Structure
 
 ```
@@ -10,6 +19,38 @@ watch_hoops/
 ├── frontend/         # React frontend application
 └── docker/          # Docker configuration files
 ```
+
+## Core Features
+
+### Live Game Experience
+- Stream live basketball games
+- Real-time player statistics updates
+- Live game commentary
+- Multi-camera viewing options
+
+### Game Statistics Management
+- Real-time stat tracking during games
+- Player performance analytics
+- Team statistics aggregation
+- Historical data analysis
+
+### League Management
+- Season schedule creation and management
+- Tournament organization
+- Team registration and management
+- Player roster management
+
+### Ticketing System
+- Online ticket purchasing
+- Season pass options
+- QR code-based ticket validation
+- Venue capacity management
+
+### News and Announcements
+- League news and updates
+- Team announcements
+- Player highlights
+- Push notifications for subscribed users
 
 ## Prerequisites
 
@@ -150,9 +191,61 @@ python manage.py test
 cd frontend
 npm test
 ```
+```
+
+## API Features
+
+### Real-time Statistics API
+- POST /api/games/stats/record/
+  Track live game statistics
+- GET /api/games/stats/live/{game_id}/
+  Fetch real-time game statistics
+- GET /api/players/stats/history/{player_id}/
+  Retrieve historical player statistics
+
+### League Management API
+- GET /api/leagues/schedule/{league_id}/
+  Retrieve league schedule
+- POST /api/leagues/games/create/
+  Create new game fixtures
+- PUT /api/leagues/games/update/{game_id}/
+  Update game details
+- GET /api/leagues/standings/
+  Get current league standings
+
+### Ticket Management API
+- GET /api/tickets/available/{game_id}/
+  Check ticket availability
+- POST /api/tickets/purchase/
+  Purchase tickets
+- GET /api/tickets/validate/{ticket_id}/
+  Validate ticket QR codes
+- GET /api/tickets/user/{user_id}/
+  List user's tickets
+
+### News and Announcements API
+- GET /api/news/league/{league_id}/
+  Get league-specific news
+- POST /api/news/create/
+  Create news article
+- GET /api/announcements/team/{team_id}/
+  Get team announcements
+- POST /api/notifications/subscribe/
+  Subscribe to push notifications
+
+## WebSocket Endpoints
+
+### Real-time Game Updates
+- ws://api/games/live/{game_id}/
+  Real-time game statistics and updates
+- ws://api/games/commentary/{game_id}/
+  Live game commentary
+
+### Notifications
+- ws://api/notifications/
+  Real-time platform notifications
 
 ## Development Tools
-
 ### Backend Development
 
 1. Django Admin Interface:

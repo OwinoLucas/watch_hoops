@@ -74,9 +74,10 @@ MIDDLEWARE = [
     'monitoring.middleware.PerformanceMonitoringMiddleware',
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Next.js development server
-]
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",  # Next.js development server
+# ]
+CORS_ALLOW_ALL_ORIGINS = True 
 
 # Rest Framework settings
 REST_FRAMEWORK = {
