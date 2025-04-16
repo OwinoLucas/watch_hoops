@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from .models import StreamKey, StreamAccess
-from games.models import Match
+from games.models import Game
 from django.utils import timezone
 from datetime import timedelta, datetime
 
@@ -30,7 +30,7 @@ class StreamAccessViewSet(viewsets.ViewSet):
 
     def create(self, request):
         match_id = request.data.get('match_id')
-        match = get_object_or_404(Match, id=match_id)
+        match = get_object_or_404(Game, id=match_id)
         
         # Check if user has paid or has valid subscription
         if not request.user.viewer_profile.is_subscription_active():

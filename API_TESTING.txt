@@ -1,0 +1,401 @@
+# Watch Hoops API Testing Documentation
+
+## Testing Setup
+
+### Environment Setup in Postman/Insomnia
+
+1. Create Environment Variables:
+```json
+{
+  "base_url": "http://localhost:8000/api",
+  "access_token": "",
+  "refresh_token": ""
+}
+```
+
+2. Create Collection:
+   - Name: "Watch Hoops API"
+   - Add variables to collection:
+     ```json
+     {
+       "admin_email": "admin@example.com",
+       "admin_password": "adminpass",
+       "test_user_email": "test@example.com",
+       "test_user_password": "testpass"
+     }
+     ```
+
+## API Endpoints and Testing Scenarios
+
+### 1. Authentication
+
+#### Register New User
+- Method: POST
+- Endpoint: {{base_url}}/auth/register/
+- Body (JSON):
+```json
+{
+  "email": "{{test_user_email}}",
+  "password": "{{test_user_password}}",
+  "first_name": "Test",
+  "last_name": "User",
+  "user_type": "VIEWER"
+}
+```
+- Test scenarios:
+  1. Valid registration
+  2. Duplicate email
+  3. Weak password
+  4. Missing required fields
+
+#### Login
+- Method: POST
+- Endpoint: {{base_url}}/auth/login/
+- Body (JSON):
+```json
+{
+  "email": "{{test_user_email}}",
+  "password": "{{test_user_password}}"
+}
+```
+- Tests:
+  ```javascript
+  // Save tokens to environment
+  const response = JSON.parse(responseBody);
+  pm.environment.set("access_token", response.access);
+  pm.environment.set("refresh_token", response.refresh);
+  ```
+
+#### Refresh Token
+- Method: POST
+- Endpoint: {{base_url}}/auth/login/refresh/
+- Body (JSON):
+```json
+{
+  "refresh": "{{refresh_token}}"
+}
+```
+
+#### Change Password
+- Method: POST
+- Endpoint: {{base_url}}/auth/change-password/
+- Auth: Bearer {{access_token}}
+- Body (JSON):
+```json
+{
+  "old_password": "current_password",
+  "new_password": "new_password"
+}
+```
+
+### 2. Teams and Leagues
+
+#### List Leagues
+- Method: GET
+- Endpoint: {{base_url}}/teams/leagues/
+- Auth: Bearer {{access_token}}
+- Query Parameters:
+  - page: 1
+  - page_size: 10
+  - ordering: name
+  - search: optional search term
+
+#### Create League (Admin)
+- Method: POST
+- Endpoint: {{base_url}}/teams/leagues/
+- Auth: Bearer {{access_token}}
+- Body (JSON):
+```json
+{
+  "name": "Test League",
+  "country": "US",
+  "description": "Test league description"
+}
+```
+- Test scenarios:
+  1. Create with admin token
+  2. Create with non-admin token (should fail)
+  3. Create with duplicate name (should fail)
+
+#### List Teams
+- Method: GET
+- Endpoint: {{base_url}}/teams/teams/
+- Auth: Bearer {{access_token}}
+- Query Parameters:
+  - league: league_id
+  - page: 1
+  - page_size: 10
+  - ordering: name
+
+### 3. Players
+
+#### List Players
+- Method: GET
+- Endpoint: {{base_url}}/players/players/
+- Auth: Bearer {{access_token}}
+- Query Parameters:
+  - team: team_id
+  - position: PG/SG/SF/PF/C
+  - active: true/false
+
+#### Create Player
+- Method: POST
+- Endpoint: {{base_url}}/players/players/
+- Auth: Bearer {{access_token}}
+- Body (JSON):
+```json
+{
+  "user": {
+    "email": "player@example.com",
+    "password": "playerpass",
+    "first_name": "John",
+    "last_name": "Doe",
+    "user_type": "PLAYER"
+  },
+  "team": 1,
+  "position": "PG",
+  "jersey_number": 23,
+  "height_cm": 188,
+  "weight_kg": 85,
+  "nationality": "US"
+}
+```
+
+### 4. Games
+
+#### List Games
+- Method: GET
+- Endpoint: {{base_url}}/games/matches/
+- Auth: Bearer {{access_token}}
+- Query Parameters:
+  - status: SCHEDULED/LIVE/FINISHED
+  - team: team_id
+  - league: league_id
+  - date_from: YYYY-MM-DD
+  - date_to: YYYY-MM-DD
+
+#### Create Game
+- Method: POST
+- Endpoint: {{base_url}}/games/matches/
+- Auth: Bearer {{access_token}}
+- Body (JSON):
+```json
+{
+  "home_team": 1,
+  "away_team": 2,
+  "league": 1,
+  "date_time": "2025-05-01T19:30:00Z",
+  "venue": "Test Arena",
+  "ticket_price": 50.00,
+  "streaming_price": 9.99
+}
+```
+
+### 5. News
+
+#### List Articles
+- Method: GET
+- Endpoint: {{base_url}}/news/articles/
+- Auth: Bearer {{access_token}}
+- Query Parameters:
+  - category: category_id
+  - featured: true/false
+  - ordering: -published_date
+
+#### Create Article
+- Method: POST
+- Endpoint: {{base_url}}/news/articles/
+- Auth: Bearer {{access_token}}
+- Body (form-data):
+  - title: "Test Article"
+  - content: "Article content"
+  - featured_image: [file upload]
+  - categories: [1, 2]
+  - tags: [1, 2]
+  - is_featured: false
+
+### 6. Streaming
+
+#### List Available Streams
+- Method: GET
+- Endpoint: {{base_url}}/streaming/streams/
+- Auth: Bearer {{access_token}}
+- Query Parameters:
+  - status: SCHEDULED/LIVE
+  - game: game_id
+
+#### Purchase Stream Access
+- Method: POST
+- Endpoint: {{base_url}}/streaming/access/purchase/
+- Auth: Bearer {{access_token}}
+- Body (JSON):
+```json
+{
+  "stream_id": 1,
+  "quality": "HD"
+}
+```
+
+#### Start Viewing Session
+- Method: POST
+- Endpoint: {{base_url}}/streaming/sessions/start/
+- Auth: Bearer {{access_token}}
+- Body (JSON):
+```json
+{
+  "stream_id": 1,
+  "device_type": "desktop",
+  "quality": "HD"
+}
+```
+
+## Collection Tests
+
+### Pre-request Scripts
+
+Add this script to your collection to automatically handle token refresh:
+```javascript
+// Check if token needs refresh
+if (pm.environment.get("access_token")) {
+    const tokenExp = pm.environment.get("token_expiry");
+    if (tokenExp && new Date().getTime() > tokenExp) {
+        // Refresh token
+        pm.sendRequest({
+            url: pm.environment.get("base_url") + "/auth/login/refresh/",
+            method: "POST",
+            header: {
+                "Content-Type": "application/json"
+            },
+            body: {
+                mode: "raw",
+                raw: JSON.stringify({
+                    refresh: pm.environment.get("refresh_token")
+                })
+            }
+        }, function (err, res) {
+            if (!err && res.code === 200) {
+                const response = res.json();
+                pm.environment.set("access_token", response.access);
+                pm.environment.set("token_expiry", new Date().getTime() + (1 * 60 * 60 * 1000)); // 1 hour
+            }
+        });
+    }
+}
+```
+
+### Response Tests
+
+Add these tests to your requests:
+
+1. Authentication Check:
+```javascript
+pm.test("Response status code is 200", function () {
+    pm.response.to.have.status(200);
+});
+
+pm.test("Response has valid structure", function () {
+    const response = pm.response.json();
+    pm.expect(response).to.be.an("object");
+    pm.expect(response.error).to.be.undefined;
+});
+```
+
+2. Error Response Check:
+```javascript
+pm.test("Error response is properly formatted", function () {
+    if (pm.response.code >= 400) {
+        const response = pm.response.json();
+        pm.expect(response).to.have.property("error");
+        pm.expect(response).to.have.property("code");
+    }
+});
+```
+
+## Test Scenarios
+
+### User Management Flow
+1. Register new user
+2. Login
+3. Update profile
+4. Change password
+5. Logout
+
+### Game Access Flow
+1. List available games
+2. Purchase ticket/stream access
+3. Start viewing session
+4. Update session metrics
+5. End session
+
+### Content Management Flow (Admin)
+1. Create league
+2. Create team
+3. Add players
+4. Schedule game
+5. Create news article
+
+## Environment Management
+
+### Local Development
+```json
+{
+  "base_url": "http://localhost:8000/api",
+  "admin_email": "admin@example.com",
+  "admin_password": "adminpass"
+}
+```
+
+### Staging
+```json
+{
+  "base_url": "https://staging.watchhoops.com/api",
+  "admin_email": "admin@staging.watchhoops.com",
+  "admin_password": "stagingpass"
+}
+```
+
+### Production
+```json
+{
+  "base_url": "https://api.watchhoops.com",
+  "admin_email": "admin@watchhoops.com",
+  "admin_password": "prodpass"
+}
+```
+
+## Best Practices
+
+1. Environment Setup:
+   - Use environment variables for base URL and credentials
+   - Keep sensitive data in environment variables
+   - Use different environments for development/staging/production
+
+2. Collection Organization:
+   - Group related requests into folders
+   - Use meaningful request names
+   - Add descriptions to requests and folders
+
+3. Testing:
+   - Write tests for all responses
+   - Check status codes
+   - Validate response structure
+   - Test error scenarios
+   - Monitor response times
+
+4. Authentication:
+   - Use collection-level pre-request scripts for token refresh
+   - Store tokens in environment variables
+   - Clear sensitive data after testing
+
+5. Documentation:
+   - Keep request descriptions up to date
+   - Document expected responses
+   - Include example payloads
+   - Document error scenarios
+
+Remember to:
+- Run tests in sequence where order matters
+- Clean up test data after testing
+- Update environment variables as needed
+- Monitor rate limits
+- Keep security tokens secure
